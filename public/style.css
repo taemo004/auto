@@ -123,6 +123,8 @@ select option { background: #1a2233; }
 .row { display: flex; gap: 10px; }
 .row > .btn { flex: 1; }
 
+.hint { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 10px; }
+.hint:empty { display: none; }
 .msg { min-height: 20px; color: var(--accent2); text-align: center; margin: 6px 0; font-size: 14px; }
 
 .help { margin-top: 10px; color: var(--muted); font-size: 14px; }

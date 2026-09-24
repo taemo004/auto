@@ -1,6 +1,7 @@
 # 🏁 Turbo Rivals – Online-Autorennen im Browser
 
-Ein schnelles Top-Down-Autorennspiel mit **Online-Multiplayer**, komplett im Browser – ohne Installation, ohne Login.
+Ein schnelles Top-Down-Autorennspiel mit **Online-Multiplayer**, komplett im Browser – ohne Installation, ohne Login
+und **ohne eigenen Server**: Das Spiel läuft auf GitHub Pages, die Browser verbinden sich direkt miteinander (WebRTC).
 Inspiriert vom „Sofort-loslegen“-Prinzip von Spielen wie *Top Tennis*: Name eintippen, Farbe wählen, fahren.
 
 ## Features
@@ -15,7 +16,7 @@ Inspiriert vom „Sofort-loslegen“-Prinzip von Spielen wie *Top Tennis*: Name 
 - Reifenspuren, Partikel, Kamerawackeln, synthetischer Motorsound (WebAudio)
 - HUD: Platz, Runde, Zeit, Rundenbestzeit, Live-Rangliste, Minimap, Tacho
 - Touch-Steuerung für Handy/Tablet
-- Server misst die Zielzeiten selbst und prüft den gemeldeten Fortschritt (einfacher Schutz gegen Schummeln)
+- Der Gastgeber misst die Zielzeiten selbst und prüft den gemeldeten Fortschritt (einfacher Schutz gegen Schummeln)
 
 ## Steuerung
 
@@ -30,33 +31,49 @@ Inspiriert vom „Sofort-loslegen“-Prinzip von Spielen wie *Top Tennis*: Name 
 | `M` | Ton an/aus |
 | `Esc` | Rennen verlassen |
 
-## Starten
+## Online spielen (GitHub Pages)
 
-Voraussetzung: Node.js ≥ 18
+Das Spiel besteht nur aus statischen Dateien in `public/` und wird per GitHub Actions
+(`.github/workflows/pages.yml`) bei jedem Push auf `main` automatisch veröffentlicht.
+
+Einmalig einrichten: im Repository **Settings → Pages → Build and deployment → Source: „GitHub Actions“** wählen.
+Danach ist das Spiel unter `https://<benutzername>.github.io/<repository>/` erreichbar.
+
+> Hinweis: GitHub Pages ist für öffentliche Repositories kostenlos, für private Repositories braucht man GitHub Pro/Team.
+
+## Lokal starten
+
+Voraussetzung: Node.js ≥ 18 (keine Abhängigkeiten nötig)
 
 ```bash
-npm install
 npm start
 ```
 
-Dann im Browser **http://localhost:3000** öffnen. Für Multiplayer im Heimnetz einfach die IP des Rechners
-(z. B. `http://192.168.0.10:3000`) auf den anderen Geräten öffnen. Port ändern: `PORT=8080 npm start`.
+Dann im Browser **http://localhost:3000** öffnen. Jeder andere statische Webserver funktioniert genauso
+(z. B. `npx serve public`).
 
-## Online stellen
+## So funktioniert der Multiplayer
 
-Der Server ist ein einzelner Node-Prozess (HTTP + WebSocket auf demselben Port) und läuft auf jedem
-Node-Hoster mit WebSocket-Unterstützung, z. B. Render, Railway, Fly.io oder einem eigenen VPS:
+- Wer einen Raum erstellt, ist **Gastgeber**. In seinem Browser läuft die Raumlogik (`public/js/room.js`):
+  Lobby, Countdown, Verteilen der Positionen (20×/s), Zieleinlauf und Ergebnis.
+- Alle anderen verbinden sich per **WebRTC direkt** mit dem Gastgeber. Zum Finden des Gastgebers wird nur der
+  kostenlose öffentliche Vermittlungsserver von [PeerJS](https://peerjs.com) genutzt – die Spieldaten laufen nicht darüber.
+- Der Raumcode ist gleichzeitig die Verbindungs-ID des Gastgebers. *Schnelles Spiel* nutzt die festen öffentlichen
+  Räume `QK01`…`QK08`: Ist ein Raum frei, wird man selbst Gastgeber, sonst tritt man bei.
+- Jeder Browser simuliert sein eigenes Auto lokal (keine Eingabeverzögerung); die Gegner werden mit ~110 ms
+  Interpolation flüssig dargestellt.
 
-- Build-Befehl: `npm install`
-- Start-Befehl: `npm start`
-- Der Port wird über die Umgebungsvariable `PORT` übernommen.
+**Einschränkungen:** Verlässt der Gastgeber den Raum oder schließt das Fenster, endet der Raum für alle.
+Das Gastgeber-Fenster sollte im Vordergrund bleiben (Browser drosseln Hintergrund-Tabs). In sehr restriktiven
+Netzwerken (manche Firmen-/Schulnetze) kann eine direkte Verbindung scheitern.
 
-Hinter HTTPS verbindet sich der Client automatisch per `wss://`.
+Optional kann ein eigener PeerJS-Server genutzt werden: `?peerhost=mein-server.de&peerport=443&peerpath=/`
 
 ## Aufbau
 
 ```
-server.js            Node-Server: statische Dateien + WebSocket (Räume, Lobby, Rennablauf, Zustands-Relay 20 Hz)
+server.js            Kleiner lokaler Entwicklungsserver (nur statische Dateien)
+.github/workflows/   Automatische Veröffentlichung auf GitHub Pages
 public/index.html    Menüs, Lobby, HUD
 public/style.css     Styling (inkl. Mobil-Layout)
 public/js/main.js    Spielablauf, Eingabe, Lobby-UI, Netzwerk-Synchronisation & Interpolation
@@ -64,14 +81,12 @@ public/js/car.js     Fahrphysik, Rundenzählung (Checkpoints), Kollisionen, KI-F
 public/js/tracks.js  Streckendefinitionen (Catmull-Rom-Splines) und Geometrie
 public/js/render.js  Canvas-Renderer, Minimap, Effekte
 public/js/audio.js   Motorsound und Effekte
-public/js/net.js     WebSocket-Client
+public/js/net.js     Peer-to-Peer-Verbindungen (PeerJS/WebRTC), Raum erstellen/beitreten/Schnelles Spiel
+public/js/room.js    Raumlogik, läuft im Browser des Gastgebers
+public/vendor/       PeerJS 1.5.5 (MIT-Lizenz)
 ```
-
-**Netzwerkmodell:** Jeder Client simuliert sein eigenes Auto lokal (sofortige Reaktion ohne Lag) und schickt
-20× pro Sekunde seinen Zustand an den Server. Der Server verteilt die Zustände an alle im Raum; die Clients
-zeigen die Gegner mit ~110 ms Interpolation flüssig an. Start, Countdown, Zieleinlauf und Ergebnis steuert der Server.
 
 ### Neue Strecke hinzufügen
 
 In `public/js/tracks.js` einen Eintrag zu `TRACK_DEFS` hinzufügen (Kontrollpunkte im Uhrzeigersinn, Punkt 0 = Start/Ziel)
-und die ID in `TRACK_IDS` in `server.js` ergänzen.
+– sie erscheint automatisch in der Streckenauswahl.

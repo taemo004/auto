@@ -13,7 +13,7 @@ const STEP = 1 / 120;
 const SEND_MS = 50;
 const INTERP_MS = 110;
 
-const net = new Net();
+const net = new Net(() => ({ name: myName(), color: profile.color }));
 const sound = new Sound();
 const renderer = new Renderer($('game'), $('minimap'));
 const trackCache = {};
@@ -223,10 +223,7 @@ function enterRaceUI() {
 
 function quitRace() {
   if (!game || game.mode === 'demo') return;
-  if (game.mode === 'online') {
-    net.send({ t: 'leave' });
-    lobby = null;
-  }
+  if (game.mode === 'online') leaveRoom();
   clearTimeout(game.endTimer);
   startDemo();
   show('menu');
@@ -491,7 +488,7 @@ function updateRemotes(now) {
 net.on('joined', (m) => {
   profile.color = m.color;
   $('chat-log').innerHTML = '';
-  history.replaceState(null, '', `?room=${m.code}`);
+  setRoomParam(m.code);
   show('lobby');
 });
 
@@ -561,9 +558,10 @@ net.on('chat', (m) => addChat(`<b style="color:${m.color}">${esc(m.name)}:</b> $
 
 net.on('disconnect', () => {
   lobby = null;
+  setRoomParam(null);
   if (game && game.mode === 'online') startDemo();
   show('menu');
-  setMsg('Verbindung zum Server verloren.');
+  setMsg('Die Verbindung zum Raum wurde getrennt (hat der Gastgeber den Raum verlassen?).');
 });
 
 // ---------- Ergebnisse ----------
@@ -670,15 +668,27 @@ function renderLobby() {
     else s = 'Warte, bis der Host das Rennen startet…';
     $('lobby-status').textContent = s;
   };
+  $('lobby-hint').textContent = net.isHost ? 'Du bist Gastgeber: Lass dieses Fenster offen, sonst endet der Raum für alle.' : '';
   status();
   if (autoAt) lobbyTick = setInterval(status, 250);
 }
 
 $('btn-start').onclick = () => net.send({ t: 'startRace' });
-$('btn-lobby-leave').onclick = () => {
+function leaveRoom() {
   net.send({ t: 'leave' });
+  net.close();
   lobby = null;
-  history.replaceState(null, '', location.pathname);
+  setRoomParam(null);
+}
+function setRoomParam(code) {
+  const q = new URLSearchParams(location.search);
+  if (code) q.set('room', code);
+  else q.delete('room');
+  const qs = q.toString();
+  history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+}
+$('btn-lobby-leave').onclick = () => {
+  leaveRoom();
   show('menu');
 };
 $('btn-copy').onclick = async () => {
@@ -693,22 +703,26 @@ $('btn-copy').onclick = async () => {
 };
 
 // ---------- Menü ----------
+let connecting = false;
 async function online(action) {
+  if (connecting) return;
+  connecting = true;
   sound.resume();
   setMsg('Verbinde…');
   try {
-    await net.connect();
-  } catch {
-    setMsg('Server nicht erreichbar. Einzelspieler funktioniert trotzdem!');
-    return;
+    await action();
+    setMsg('');
+  } catch (e) {
+    console.warn('Verbindung fehlgeschlagen:', e.type, e.message);
+    const known = ['not-found', 'full', 'no-lib'];
+    setMsg(known.includes(e.type) ? e.message : 'Verbindung fehlgeschlagen. Prüfe deine Internetverbindung – Einzelspieler geht trotzdem!');
+  } finally {
+    connecting = false;
   }
-  setMsg('');
-  net.send({ t: 'hello', name: myName(), color: profile.color });
-  net.send(action);
 }
 
-$('btn-quick').onclick = () => online({ t: 'quick' });
-$('btn-create').onclick = () => online({ t: 'create' });
+$('btn-quick').onclick = () => online(() => net.quick());
+$('btn-create').onclick = () => online(() => net.create());
 $('btn-join').onclick = () => {
   $('join-row').classList.toggle('hidden');
   $('in-code').focus();
@@ -716,7 +730,7 @@ $('btn-join').onclick = () => {
 const joinGo = () => {
   const code = $('in-code').value.trim().toUpperCase();
   if (code.length !== 4) return setMsg('Der Raumcode hat 4 Zeichen.');
-  online({ t: 'join', code });
+  online(() => net.join(code));
 };
 $('btn-join-go').onclick = joinGo;
 $('in-code').addEventListener('keydown', (e) => e.key === 'Enter' && joinGo());
