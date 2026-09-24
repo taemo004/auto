@@ -1,0 +1,17 @@
+{
+  "name": "turbo-rivals",
+  "version": "1.0.0",
+  "description": "Browser-Autorennspiel mit Online-Multiplayer",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
