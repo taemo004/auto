@@ -1,39 +1,131 @@
-// Streckendefinitionen und Geometrie (Catmull-Rom-Spline, gleichmäßig abgetastet)
+// Streckendefinitionen, Themen, Untergründe und Geometrie (Catmull-Rom-Spline, gleichmäßig abgetastet)
 
+// Fahreigenschaften der Untergründe (Faktoren relativ zu Asphalt)
+export const SURFACES = {
+  asphalt: { grip: 1, drag: 1, accel: 1, brake: 1 },
+  dirt: { grip: 0.6, drag: 1.1, accel: 0.93, brake: 0.75 },
+  snow: { grip: 0.55, drag: 1.05, accel: 0.86, brake: 0.7 },
+  ice: { grip: 0.3, drag: 0.92, accel: 0.65, brake: 0.45 },
+  offroad: { grip: 0.6, drag: 1, accel: 0.8, brake: 0.8 },
+};
+const SURF_NAMES = ['asphalt', 'dirt', 'snow', 'ice'];
+
+export const THEMES = {
+  meadow: {
+    ground: '#3f8f3a', ground2: '#46993f', runoff: '#c9b98f', curbA: '#ffffff', curbB: '#d62828',
+    wall: '#222', wall2: '#e8e8e8', line: 'rgba(255,255,255,0.45)',
+    decor: { tree: 6, bush: 2, flowers: 1 }, stands: '#2b6cb0',
+  },
+  mountain: {
+    ground: '#4d7a37', ground2: '#54833d', runoff: '#9c8f76', curbA: '#ffffff', curbB: '#1f7a3a',
+    wall: '#333', wall2: '#f2c94c', line: 'rgba(255,255,255,0.4)',
+    decor: { pine: 7, rock: 3, tree: 1 }, stands: '#2f855a',
+  },
+  harbor: {
+    ground: '#7d858e', ground2: '#78808a', runoff: '#666d75', curbA: '#ffffff', curbB: '#1e40af',
+    wall: '#1f2937', wall2: '#facc15', line: 'rgba(255,255,255,0.5)',
+    decor: { container: 6, building: 2, crates: 2 }, stands: '#1e40af', lamps: true, water: true,
+  },
+  desert: {
+    ground: '#e0c285', ground2: '#dcbd7f', runoff: '#cfa96b', curbA: '#ffffff', curbB: '#e07a1f',
+    wall: '#5c3d1e', wall2: '#f5e6c8', line: 'rgba(255,255,255,0)',
+    decor: { cactus: 5, rock: 4, skull: 1 }, stands: '#c05621',
+  },
+  snow: {
+    ground: '#eef3f8', ground2: '#e5edf5', runoff: '#d3e0ec', curbA: '#ffffff', curbB: '#2563eb',
+    wall: '#1e3a8a', wall2: '#ffffff', line: 'rgba(255,255,255,0.6)',
+    decor: { snowpine: 7, snowman: 1, rock: 1 }, stands: '#1e3a8a',
+  },
+  neon: {
+    ground: '#131525', ground2: '#161a2d', runoff: '#1f2338', curbA: '#ff2bd6', curbB: '#00e5ff',
+    wall: '#05060c', wall2: '#ff2bd6', line: 'rgba(0,229,255,0.55)',
+    decor: { building: 8 }, stands: '#7c3aed', lamps: true, night: true,
+  },
+};
+
+// Untergrund-Farben der Fahrbahn
+export const ROAD_COLORS = {
+  asphalt: ['#4a4d52', '#505359'],
+  dirt: ['#a27850', '#ad845b'],
+  snow: ['#dfe7ef', '#e8eef5'],
+  ice: ['#9cc3e4', '#b0d2ee'],
+};
+export const NEON_ROAD = ['#262a3b', '#2b3043'];
+
+// Spezialelemente: [typ, position (0–1 entlang der Strecke), spur (-0.5 … 0.5 der Breite)]
 export const TRACK_DEFS = {
   speedway: {
-    name: 'Speedway',
-    desc: 'Schnelles Oval mit Schikane – Vollgas!',
-    width: 200,
-    grass: '#3f8f3a',
-    grass2: '#46993f',
+    name: 'Speedway', desc: 'Schnelles Oval mit Schikane und Boost-Feldern.', theme: 'meadow',
+    width: 200, surface: 'asphalt',
     points: [
       [0, 0], [900, 0], [1600, 0], [2100, 150], [2350, 550], [2250, 1000], [1850, 1250],
       [1350, 1200], [1100, 1400], [750, 1450], [0, 1450], [-500, 1250], [-700, 800], [-550, 250],
     ],
+    features: [
+      ['boost', 0.06, -0.2], ['boost', 0.06, 0.2], ['nitro', 0.2, 0], ['boost', 0.62, 0],
+      ['nitro', 0.7, -0.25], ['nitro', 0.7, 0.25], ['oil', 0.46, 0.18],
+    ],
   },
   serpentine: {
-    name: 'Serpentine',
-    desc: 'Kurvige Bergstrecke – Drift ist Pflicht.',
-    width: 180,
-    grass: '#5a8f3a',
-    grass2: '#629a41',
+    name: 'Serpentine', desc: 'Kurvige Bergstrecke mit Schotterpassage und Sprung.', theme: 'mountain',
+    width: 180, surface: 'asphalt',
     points: [
       [0, 0], [800, -100], [1350, 150], [1350, 650], [900, 850], [750, 1250], [1150, 1550],
       [1800, 1400], [2300, 1700], [2200, 2250], [1600, 2450], [800, 2350], [250, 2050],
       [-250, 1550], [-100, 1000], [-550, 650], [-500, 150],
     ],
+    zones: [['dirt', 0.36, 0.5]],
+    features: [['ramp', 0.07, 0], ['nitro', 0.3, 0.2], ['boost', 0.61, 0], ['oil', 0.8, -0.2], ['nitro', 0.9, 0]],
   },
   harbor: {
-    name: 'Hafenkurs',
-    desc: 'Technischer Stadtkurs mit engen Haarnadeln.',
-    width: 190,
-    grass: '#4d7f52',
-    grass2: '#558a5a',
+    name: 'Hafenkurs', desc: 'Technischer Stadtkurs zwischen Containern.', theme: 'harbor',
+    width: 190, surface: 'asphalt',
     points: [
       [0, 0], [700, 0], [1100, -350], [1700, -400], [2100, -50], [1850, 450], [1250, 500],
       [950, 850], [1300, 1150], [2000, 1150], [2400, 1550], [2050, 2000], [1200, 2050],
       [400, 2000], [-200, 1650], [-150, 1150], [-550, 800], [-450, 300],
+    ],
+    features: [
+      ['boost', 0.04, 0], ['oil', 0.25, -0.15], ['oil', 0.27, 0.2], ['nitro', 0.42, 0],
+      ['boost', 0.55, 0.15], ['ramp', 0.72, 0], ['nitro', 0.88, -0.2],
+    ],
+  },
+  desert: {
+    name: 'Wüstenrallye', desc: 'Schotter, Sprünge und Kakteen – driften erwünscht!', theme: 'desert',
+    width: 210, surface: 'dirt',
+    points: [
+      [0, 0], [1000, 0], [1700, -200], [2300, 100], [2500, 700], [2100, 1200], [1500, 1100],
+      [1000, 1400], [1200, 1900], [800, 2300], [0, 2200], [-500, 1700], [-300, 1100],
+      [-700, 600], [-500, 100],
+    ],
+    zones: [['asphalt', 0.97, 0.03]],
+    features: [
+      ['ramp', 0.08, 0], ['nitro', 0.16, 0], ['ramp', 0.3, 0], ['boost', 0.45, 0],
+      ['oil', 0.55, 0.2], ['ramp', 0.66, 0], ['nitro', 0.78, 0.2], ['boost', 0.9, -0.1],
+    ],
+  },
+  glacier: {
+    name: 'Gletscherring', desc: 'Spiegelglattes Eis – früh bremsen, sanft lenken.', theme: 'snow',
+    width: 220, surface: 'snow',
+    points: [
+      [0, 0], [1200, 0], [1900, 300], [2000, 900], [1500, 1300], [900, 1100], [400, 1400],
+      [500, 2000], [1200, 2300], [2000, 2200], [2600, 2500], [2500, 3100], [1600, 3300],
+      [400, 3200], [-400, 2700], [-600, 1800], [-500, 800], [-400, 250],
+    ],
+    zones: [['ice', 0.12, 0.26], ['ice', 0.52, 0.64], ['ice', 0.8, 0.88], ['asphalt', 0.985, 0.03]],
+    features: [['boost', 0.05, 0], ['nitro', 0.3, 0.2], ['ramp', 0.44, 0], ['nitro', 0.7, -0.2], ['boost', 0.93, 0]],
+  },
+  neon: {
+    name: 'Neon City', desc: 'Nachtrennen durch die Stadt mit vielen Boost-Feldern.', theme: 'neon',
+    width: 190, surface: 'asphalt',
+    points: [
+      [0, 0], [1400, 0], [1600, 200], [1600, 800], [1800, 1000], [2400, 1000], [2600, 1200],
+      [2600, 1900], [2400, 2100], [1200, 2100], [1000, 1900], [1000, 1400], [800, 1200],
+      [200, 1200], [0, 1000], [-200, 800], [-200, 200],
+    ],
+    features: [
+      ['boost', 0.08, -0.2], ['boost', 0.13, 0.2], ['nitro', 0.25, 0], ['boost', 0.36, 0],
+      ['ramp', 0.47, 0], ['oil', 0.56, 0.2], ['boost', 0.64, -0.15], ['nitro', 0.75, 0.2], ['boost', 0.9, 0],
     ],
   },
 };
@@ -61,8 +153,15 @@ function mulberry32(a) {
   };
 }
 
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
 export function buildTrack(id) {
   const def = TRACK_DEFS[id] || TRACK_DEFS.speedway;
+  const theme = THEMES[def.theme];
   const pts = def.points;
   const n = pts.length;
 
@@ -74,9 +173,8 @@ export function buildTrack(id) {
   }
 
   // Gleichmäßig neu abtasten
-  const samples = [];
+  const samples = [dense[0]];
   let carry = 0;
-  samples.push(dense[0]);
   for (let i = 0; i < dense.length; i++) {
     const a = dense[i];
     const b = dense[(i + 1) % dense.length];
@@ -89,7 +187,6 @@ export function buildTrack(id) {
     }
     carry = segLen - (d - SPACING);
   }
-  // Letzten Punkt entfernen, falls er zu nah am Start liegt
   const last = samples[samples.length - 1];
   if (Math.hypot(last[0] - samples[0][0], last[1] - samples[0][1]) < SPACING * 0.5) samples.pop();
 
@@ -117,10 +214,17 @@ export function buildTrack(id) {
     curv[i] = d;
   }
 
+  // Untergrund je Abtastpunkt
+  const surf = new Uint8Array(N).fill(SURF_NAMES.indexOf(def.surface));
+  for (const [kind, from, to] of def.zones || []) {
+    const a = Math.round(from * N), b = Math.round(to * N);
+    const len = (b - a + N) % N;
+    for (let k = 0; k <= len; k++) surf[(a + k) % N] = SURF_NAMES.indexOf(kind);
+  }
+
   const width = def.width;
   const wallDist = width / 2 + 110;
 
-  // Begrenzungslinien (links/rechts)
   const offsetLine = (dist) => {
     const line = [];
     for (let i = 0; i < N; i++) line.push([xs[i] - ty[i] * dist, ys[i] + tx[i] * dist]);
@@ -136,30 +240,87 @@ export function buildTrack(id) {
   const track = {
     id,
     name: def.name,
+    theme,
+    themeId: def.theme,
     width,
     wallDist,
-    grass: def.grass,
-    grass2: def.grass2,
     N,
     spacing: SPACING,
     length: N * SPACING,
-    xs, ys, tx, ty, curv,
+    xs, ys, tx, ty, curv, surf,
+    surfName: SURF_NAMES,
     bounds: { minX: minX - 600, minY: minY - 600, maxX: maxX + 600, maxY: maxY + 600 },
     wallL: offsetLine(wallDist),
     wallR: offsetLine(-wallDist),
+    features: [],
+    near: [],
     decor: [],
+    lamps: [],
+    stands: [],
   };
 
-  // Dekoration: Bäume und Büsche abseits der Strecke
-  const rnd = mulberry32(id.length * 9973 + N);
+  // Spezialelemente
+  for (const [type, at, lane = 0] of def.features || []) {
+    const idx = Math.round(at * N) % N;
+    const f = { type, idx, lat: lane * width, x: 0, y: 0, a: Math.atan2(ty[idx], tx[idx]) };
+    if (type === 'boost') Object.assign(f, { halfLen: 40, halfW: 34 });
+    if (type === 'ramp') Object.assign(f, { halfLen: 24, halfW: width / 2 });
+    if (type === 'oil') f.r = 38;
+    if (type === 'nitro') f.r = 18;
+    f.x = xs[idx] - ty[idx] * f.lat;
+    f.y = ys[idx] + tx[idx] * f.lat;
+    track.features.push(f);
+    for (let k = -8; k <= 8; k++) {
+      const i = (idx + k + N) % N;
+      (track.near[i] ||= []).push(f);
+    }
+  }
+
+  const rnd = mulberry32(hashStr(id));
   const b = track.bounds;
-  for (let k = 0; k < 420; k++) {
+
+  // Tribünen an der Start-/Zielgeraden
+  for (const side of [1, -1]) {
+    for (let k = -1; k <= 1; k++) {
+      const i = (k * 30 + N) % N;
+      const off = side * (wallDist + 70);
+      track.stands.push({
+        x: xs[i] - ty[i] * off, y: ys[i] + tx[i] * off,
+        a: Math.atan2(ty[i], tx[i]), w: 260, h: 90, side, seed: rnd(),
+      });
+    }
+  }
+
+  // Laternen entlang der Strecke
+  if (theme.lamps) {
+    for (let i = 0; i < N; i += 45) {
+      const side = (i / 45) % 2 ? 1 : -1;
+      const off = side * (wallDist + 18);
+      track.lamps.push({ x: xs[i] - ty[i] * off, y: ys[i] + tx[i] * off });
+    }
+  }
+
+  // Dekoration je nach Thema
+  const kinds = Object.entries(theme.decor);
+  const total = kinds.reduce((s, [, w]) => s + w, 0);
+  const pick = () => {
+    let r = rnd() * total;
+    for (const [k, w] of kinds) if ((r -= w) < 0) return k;
+    return kinds[0][0];
+  };
+  const big = { building: 1, container: 1 };
+  for (let k = 0; k < 520; k++) {
     const x = b.minX + rnd() * (b.maxX - b.minX);
     const y = b.minY + rnd() * (b.maxY - b.minY);
+    const kind = pick();
+    const size = big[kind] ? 70 + rnd() * 70 : 22 + rnd() * 30;
     const near = nearestFull(track, x, y);
-    if (near.dist < wallDist + 60) continue;
-    track.decor.push({ x, y, r: 22 + rnd() * 30, kind: rnd() < 0.75 ? 'tree' : 'bush', shade: rnd() });
+    if (near.dist < wallDist + 40 + (big[kind] ? size * 1.2 : size)) continue;
+    if (track.stands.some((s) => Math.hypot(s.x - x, s.y - y) < 220)) continue;
+    track.decor.push({ x, y, r: size, kind, shade: rnd(), a: rnd() * Math.PI, seed: rnd() });
   }
+  // Große Objekte zuerst zeichnen
+  track.decor.sort((p, q) => (big[q.kind] ? 1 : 0) - (big[p.kind] ? 1 : 0));
   return track;
 }
 

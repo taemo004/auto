@@ -10,6 +10,7 @@ const FINISH_GRACE_MS = 30000; // Nach dem ersten Zieleinlauf haben die anderen 
 const QUICK_AUTOSTART_MS = 15000;
 const COLORS = ['#e63946', '#3a86ff', '#ffbe0b', '#06d6a0', '#8338ec', '#fb5607', '#ff006e', '#f1f1f1'];
 
+const CAR_TYPES = ['sport', 'drift', 'muscle'];
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 function sanitizeName(name) {
@@ -53,7 +54,7 @@ export class RoomHost {
 
   // Neue Verbindung; send(msg) liefert eine Nachricht an genau diesen Client
   addClient(send) {
-    const c = { id: this.nextId++, send, name: 'Fahrer', color: COLORS[0], inRoom: false, state: null };
+    const c = { id: this.nextId++, send, name: 'Fahrer', color: COLORS[0], carType: 'sport', inRoom: false, state: null };
     this.clients.set(c.id, c);
     send({ t: 'welcome', id: c.id });
     return c.id;
@@ -84,6 +85,7 @@ export class RoomHost {
         id: p.id,
         name: p.name,
         color: p.color,
+        carType: p.carType,
         racing: this.racers.includes(p.id) && this.state !== 'lobby',
       })),
     };
@@ -194,6 +196,8 @@ export class RoomHost {
       case 'hello':
         c.name = sanitizeName(msg.name);
         c.color = sanitizeColor(msg.color);
+        if (CAR_TYPES.includes(msg.carType)) c.carType = msg.carType;
+        if (c.inRoom) this.broadcast(this.roomInfo());
         break;
 
       case 'enter':
@@ -218,9 +222,9 @@ export class RoomHost {
         break;
 
       case 'st':
-        // Fahrzeugzustand: [x, y, winkel, vx, vy, fortschritt, flags]
+        // Fahrzeugzustand: [x, y, winkel, vx, vy, fortschritt, flags, höhe]
         if (c.inRoom && this.state !== 'lobby' && this.racers.includes(c.id) && Array.isArray(msg.a)) {
-          const arr = msg.a.slice(0, 7).map(num);
+          const arr = msg.a.slice(0, 8).map(num);
           c.state = { arr, pr: arr[5] };
         }
         break;

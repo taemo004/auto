@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "laps": {
+      "$track": {
+        ".read": true,
+        ".indexOn": ["t"],
+        "$name": {
+          ".write": "!data.exists() || newData.child('t').val() < data.child('t').val()",
+          ".validate": "$track.matches(/^(speedway|serpentine|harbor|desert|glacier|neon)$/) && $name.length <= 32 && newData.hasChildren(['n', 't', 'd'])",
+          "n": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 16" },
+          "t": { ".validate": "newData.isNumber() && newData.val() >= 5000 && newData.val() <= 600000" },
+          "d": { ".validate": "newData.val() === now" },
+          "c": { ".validate": "newData.isString() && newData.val().length <= 7" },
+          "car": { ".validate": "newData.isString() && newData.val().length <= 10" },
+          "$other": { ".validate": false }
+        }
+      }
+    }
+  }
+}
