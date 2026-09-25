@@ -3,11 +3,12 @@
 import { TRACK_DEFS, TRACK_IDS, buildTrack, gridPosition } from './tracks.js';
 import { createCar, updateCar, collideCars, botInput, CAR_TYPES, CAR_TYPE_IDS } from './car.js';
 import { Renderer, drawTrackPreview, drawCarPreview } from './render.js';
-import { submitLap, fetchBoard, personalBest, isGlobal, nameKey } from './leaderboard.js';
+import { submitLap, personalBest } from './leaderboard.js';
+import { initBoardUI } from './board-ui.js';
+import { $, fmt, esc, sleep } from './util.js';
 import { Net } from './net.js';
 import { Sound } from './audio.js';
 
-const $ = (id) => document.getElementById(id);
 const COLORS = ['#e63946', '#3a86ff', '#ffbe0b', '#06d6a0', '#8338ec', '#fb5607', '#ff006e', '#f1f1f1'];
 const BOT_NAMES = ['Blitz', 'Turbo Tina', 'Max Speed', 'Drift König', 'Rakete', 'Schumi Jr.', 'Vollgas Vera', 'Nitro Nick'];
 const STEP = 1 / 120;
@@ -80,6 +81,12 @@ const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in win
 const settings = {
   camera: localStorage.getItem('tr_camera') || 'auto',
   autoGas: localStorage.getItem('tr_autogas') ? localStorage.getItem('tr_autogas') === '1' : false,
+  steer: +localStorage.getItem('tr_steer') || 1,
+};
+$('set-steer').value = String(settings.steer);
+$('set-steer').onchange = () => {
+  settings.steer = +$('set-steer').value;
+  localStorage.setItem('tr_steer', settings.steer);
 };
 $('set-camera').value = settings.camera;
 $('set-autogas').checked = settings.autoGas;
@@ -105,6 +112,7 @@ function show(name) {
 function setMsg(text) {
   $('menu-msg').textContent = text || '';
 }
+const boardUI = initBoardUI({ myName, show });
 
 // ---------- Eingabe ----------
 const keys = { up: false, down: false, left: false, right: false, drift: false, nitro: false };
@@ -176,7 +184,7 @@ let touchSteer = null;
     knob.style.transform = `translateX(${v * half}px)`;
     // Totzone und feinere Kontrolle um die Mitte
     const a = Math.max(0, Math.abs(v) - 0.08) / 0.92;
-    touchSteer = Math.sign(v) * Math.pow(a, 1.3);
+    touchSteer = Math.sign(v) * Math.min(1, Math.pow(a, 1.3) * settings.steer);
   };
   pad.addEventListener('pointerdown', (e) => {
     e.preventDefault();
@@ -577,14 +585,6 @@ function toast(text, ms = 1800) {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
-function fmt(ms) {
-  if (ms == null) return '–';
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const c = Math.floor((ms % 1000) / 10);
-  return `${m}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}`;
-}
-
 function updateHud(now) {
   const g = game, car = g.player;
   if (!car) return;
@@ -624,10 +624,6 @@ function updateHud(now) {
       sound.beep(1046, 0.5, 'square', 0.25);
     } else if (text) sound.beep(523, 0.2, 'square', 0.2);
   }
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 // ---------- Online: Zustandsabgleich ----------
@@ -681,6 +677,7 @@ function updateRemotes(now) {
 // ---------- Online: Nachrichten ----------
 net.on('joined', (m) => {
   profile.color = m.color;
+  nextHostId = null;
   $('chat-log').innerHTML = '';
   setRoomParam(m.code);
   show('lobby');
@@ -689,6 +686,11 @@ net.on('joined', (m) => {
 net.on('room', (m) => {
   lobby = m;
   renderLobby();
+});
+
+let nextHostId = null; // vom scheidenden Gastgeber benannter Nachfolger
+net.on('hostLeaving', (m) => {
+  nextHostId = m.nextId;
 });
 
 net.on('error', (m) => {
@@ -751,13 +753,50 @@ net.on('results', (m) => {
 
 net.on('chat', (m) => addChat(`<b style="color:${m.color}">${esc(m.name)}:</b> ${esc(m.text)}`));
 
-net.on('disconnect', () => {
+// Der Gastgeber ist weg: Der nächste Spieler in der Liste übernimmt den Raum, alle anderen treten neu bei.
+net.on('hostlost', async (m) => {
+  const old = lobby;
   lobby = null;
+  clearInterval(lobbyTick);
+  const wasRacing = game && game.mode === 'online';
+  if (wasRacing) {
+    clearTimeout(game.endTimer);
+    startDemo();
+  }
+  // Nachfolger: vom alten Gastgeber benannt, sonst (Verbindung abgerissen) der erste Spieler nach dem Host
+  let next = old && nextHostId != null ? old.players.find((p) => p.id === nextHostId) : null;
+  if (!next && old) next = old.players.find((p) => p.id !== old.hostId);
+  nextHostId = null;
+  const iAmNext = !!next && next.id === m.myId;
+  if (!old || !next) return dropToMenu('Die Verbindung zum Raum wurde getrennt.');
+
+  show('lobby');
+  $('lobby-players').innerHTML = '';
+  $('btn-start').classList.add('hidden');
+  $('lobby-hint').textContent = '';
+  $('lobby-status').textContent = iAmNext
+    ? 'Der Gastgeber hat den Raum verlassen – du übernimmst…'
+    : `Der Gastgeber hat den Raum verlassen – ${esc(next.name)} übernimmt, bitte warten…`;
+  try {
+    if (iAmNext) await net.takeOver(m.code, m.isPublic, { track: old.track, laps: old.laps });
+    else {
+      await sleep(1500);
+      await net.rejoin(m.code);
+    }
+    addChat(`<span class="sys">Der Gastgeber hat den Raum verlassen. ${wasRacing ? 'Das Rennen wurde abgebrochen. ' : ''}Neuer Gastgeber: ${esc(next.name)}</span>`);
+  } catch {
+    dropToMenu('Der Raum konnte nicht übernommen werden. Erstelle einen neuen Raum oder tritt erneut bei.');
+  }
+});
+
+function dropToMenu(msg) {
+  lobby = null;
+  net.close();
   setRoomParam(null);
   if (game && game.mode === 'online') startDemo();
   show('menu');
-  setMsg('Die Verbindung zum Raum wurde getrennt (hat der Gastgeber den Raum verlassen?).');
-});
+  setMsg(msg);
+}
 
 // ---------- Ergebnisse ----------
 function showResults(results, myId) {
@@ -768,7 +807,7 @@ function showResults(results, myId) {
     .join('');
   const wasOnline = g.mode === 'online';
   const setup = g.setup;
-  showRaceLapInfo(g);
+  boardUI.showRaceLapInfo(g);
   startDemo();
   show('results');
   $('btn-results-ok').onclick = () => {
@@ -780,77 +819,6 @@ function showResults(results, myId) {
     } else show('menu');
   };
 }
-
-async function showRaceLapInfo(g) {
-  const el = $('results-extra');
-  const name = TRACK_DEFS[g.trackId].name;
-  const pb = personalBest(g.trackId);
-  let html = `Schnellste Runde im Rennen: <b>${fmt(g.bestLap || null)}</b><br>Deine Bestzeit auf ${esc(name)}: <b>${fmt(pb ? pb.t : null)}</b>`;
-  el.innerHTML = html;
-  if (!pb) return;
-  const { global, entries } = await fetchBoard(g.trackId, 1000);
-  const rank = entries.findIndex((e) => e.key === nameKey(myName())) + 1;
-  html += `<br>${global ? 'Weltweit' : 'Auf diesem Gerät'}: <b>${rank ? `Platz ${rank}` : 'nicht in den Top 1000'}</b>`;
-  el.innerHTML = html;
-}
-
-// ---------- Bestenliste ----------
-let boardTrack = TRACK_IDS[0];
-let boardLimit = 10;
-let boardReq = 0;
-function buildBoardTabs() {
-  const box = $('board-tracks');
-  box.innerHTML = '';
-  for (const id of TRACK_IDS) {
-    const b = document.createElement('button');
-    b.textContent = TRACK_DEFS[id].name;
-    b.className = id === boardTrack ? 'sel' : '';
-    b.onclick = () => {
-      boardTrack = id;
-      buildBoardTabs();
-      loadBoard();
-    };
-    box.appendChild(b);
-  }
-}
-for (const b of document.querySelectorAll('#board-limit button')) {
-  b.onclick = () => {
-    boardLimit = +b.dataset.l;
-    for (const x of document.querySelectorAll('#board-limit button')) x.classList.toggle('sel', x === b);
-    loadBoard();
-  };
-}
-async function loadBoard() {
-  const req = ++boardReq;
-  $('board-kind').textContent = isGlobal() ? 'Weltweit' : 'Nur dieses Gerät';
-  $('board-list').innerHTML = '<li>Lade…</li>';
-  const { global, entries, error } = await fetchBoard(boardTrack, 1000);
-  if (req !== boardReq) return;
-  const me = nameKey(myName());
-  const myIdx = entries.findIndex((e) => e.key === me);
-  const pb = personalBest(boardTrack);
-  let meHtml = '';
-  if (error) meHtml += 'Die weltweite Liste ist gerade nicht erreichbar – gezeigt werden deine lokalen Zeiten.<br>';
-  if (myIdx >= 0) meHtml += `Du (${esc(myName())}): <b>Platz ${myIdx + 1}</b> mit <b>${fmt(entries[myIdx].t)}</b>`;
-  else if (pb) meHtml += `Deine Bestzeit: <b>${fmt(pb.t)}</b> (nicht in den Top 1000)`;
-  else meHtml += 'Du hast auf dieser Strecke noch keine Rundenzeit – fahr los!';
-  if (!global) meHtml += '<br><small>Die weltweite Bestenliste ist noch nicht eingerichtet (siehe BESTENLISTE.md).</small>';
-  $('board-me').innerHTML = meHtml;
-  const shown = entries.slice(0, boardLimit);
-  $('board-list').innerHTML = shown.length
-    ? shown
-        .map((e) => `<li class="${e.key === me ? 'me' : ''}"><span class="dot" style="background:${esc(e.c || '#999')}"></span>${esc(e.n)} <span class="car">${esc(CAR_TYPES[e.car]?.name || '')}</span><span class="time">${fmt(e.t)}</span></li>`)
-        .join('')
-    : '<li>Noch keine Zeiten.</li>';
-  if (myIdx >= boardLimit) {
-    $('board-list').innerHTML += `<li class="me" style="counter-set: r ${myIdx}"><span class="dot" style="background:${esc(entries[myIdx].c || '#999')}"></span>${esc(entries[myIdx].n)}<span class="time">${fmt(entries[myIdx].t)}</span></li>`;
-  }
-}
-$('btn-board').onclick = () => {
-  buildBoardTabs();
-  show('board');
-  loadBoard();
-};
 
 // ---------- Lobby ----------
 function addChat(html) {

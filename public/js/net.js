@@ -9,6 +9,8 @@ const PREFIX = 'turborivals-v1-';
 const QUICK_SLOTS = 8;
 const TIMEOUT_MS = 12000;
 const CONNECT_TIMEOUT_MS = 7000;
+const HEARTBEAT_MS = 2000;
+const HOST_TIMEOUT_MS = 7000; // ohne Lebenszeichen vom Gastgeber gilt die Verbindung als tot
 
 // Optional eigener PeerJS-Server: ?peerhost=example.com&peerport=443&peerpath=/
 function peerOptions() {
@@ -30,6 +32,8 @@ function makeCode() {
   return code;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function netError(type, msg) {
   const e = new Error(msg || type);
   e.type = type;
@@ -45,6 +49,10 @@ export class Net {
     this.conn = null;
     this.host = null;
     this.pending = null; // laufender Beitrittsversuch { resolve, reject }
+    this.code = null;
+    this.isPublic = false;
+    this.watchdog = null;
+    this.pulse = null;
   }
 
   get isHost() {
@@ -68,10 +76,14 @@ export class Net {
   // Alles trennen (Raum verlassen). Als Host endet der Raum damit für alle.
   close() {
     this.closing = true;
-    if (this.host) this.host.destroy();
-    if (this.conn) this.conn.close();
-    if (this.peer) this.peer.destroy();
+    const { host, conn, peer } = this;
+    // Erst abmelden, dann schließen – sonst greift der Auto-Reconnect des Gastgebers
     this.host = this.conn = this.peer = null;
+    clearTimeout(this.watchdog);
+    clearInterval(this.pulse);
+    if (host) host.destroy();
+    if (conn) conn.close();
+    if (peer) peer.destroy();
     this.id = null;
     this.pending = null;
     this.closing = false;
@@ -136,6 +148,36 @@ export class Net {
     throw netError('full', 'Alle öffentlichen Räume sind voll. Erstelle einen eigenen Raum!');
   }
 
+  // Gastgeber-Wechsel: Der nächste Spieler übernimmt die Raum-ID, sobald sie frei ist.
+  async takeOver(code, isPublic, settings) {
+    this.close();
+    const until = Date.now() + 8000;
+    for (;;) {
+      try {
+        return await this.startHost(code, isPublic, settings);
+      } catch (e) {
+        this.close();
+        if (e.type !== 'unavailable-id' || Date.now() > until) throw e;
+        await sleep(500);
+      }
+    }
+  }
+
+  // Nach einem Gastgeber-Wechsel wieder in denselben Raum
+  async rejoin(code) {
+    this.close();
+    const until = Date.now() + 12000;
+    for (;;) {
+      try {
+        return await this.joinAsClient(code);
+      } catch (e) {
+        this.close();
+        if (Date.now() > until) throw e;
+        await sleep(700);
+      }
+    }
+  }
+
   async idIsFree(code) {
     try {
       const probe = await this.openPeer(PREFIX + code);
@@ -174,11 +216,14 @@ export class Net {
     });
   }
 
-  async startHost(code, isPublic) {
+  async startHost(code, isPublic, settings) {
     const peer = await this.openPeer(PREFIX + code);
     this.peer = peer;
     const host = new RoomHost(code, isPublic);
+    if (settings) host.applySettings(settings);
     this.host = host;
+    this.code = code;
+    this.isPublic = isPublic;
 
     // Bei Abbruch der Verbindung zum Vermittlungsserver neu anmelden, damit weiter Spieler beitreten können
     peer.on('disconnected', () => {
@@ -195,7 +240,7 @@ export class Net {
     });
 
     // Eigener (lokaler) Spieler
-    this.id = host.addClient((m) => queueMicrotask(() => this.onMessage(m)));
+    this.id = host.addClient((m) => queueMicrotask(() => this.onMessage(m)), true);
     const p = this.getProfile();
     host.handle(this.id, { t: 'hello', name: p.name, color: p.color });
     host.handle(this.id, { t: 'enter' });
@@ -220,20 +265,43 @@ export class Net {
       };
       const conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
       this.conn = conn;
-      conn.on('data', (m) => this.onMessage(m));
+      conn.on('data', (m) => {
+        this.armWatchdog(conn);
+        this.onMessage(m);
+      });
+      conn.on('open', () => {
+        this.armWatchdog(conn);
+        clearInterval(this.pulse);
+        this.pulse = setInterval(() => conn.open && conn.send({ t: 'hb' }), HEARTBEAT_MS);
+      });
       conn.on('close', () => {
         if (this.conn !== conn || this.closing) return;
         if (this.pending) this.pending.reject(netError('closed', 'Verbindung getrennt.'));
         else {
+          // Gastgeber weg → main.js organisiert den Wechsel
+          const info = { t: 'hostlost', code: this.code, isPublic: this.isPublic, myId: this.id };
           this.close();
-          this.emit({ t: 'disconnect' });
+          this.emit(info);
         }
       });
     });
   }
 
+  // Bleibt das Lebenszeichen des Gastgebers aus, gilt die Verbindung als abgerissen
+  armWatchdog(conn) {
+    clearTimeout(this.watchdog);
+    this.watchdog = setTimeout(() => {
+      if (this.conn === conn) conn.close();
+    }, HOST_TIMEOUT_MS);
+  }
+
   onMessage(m) {
     if (!m || typeof m.t !== 'string') return;
+    if (m.t === 'hb') return;
+    if (m.t === 'room') {
+      this.code = m.code;
+      this.isPublic = m.isPublic;
+    }
     if (m.t === 'welcome') {
       this.id = m.id;
       if (!this.host) {

@@ -258,6 +258,8 @@ export function collideCars(a, b, bKinematic = false) {
   const overlap = minD - d;
   const rvx = a.vx - b.vx, rvy = a.vy - b.vy;
   const vn = rvx * nx + rvy * ny;
+  // Kleiner Abstoß, damit Autos nach dem Kontakt auseinandergehen statt aneinander zu kleben
+  const push = 14;
   if (bKinematic) {
     a.x -= nx * overlap;
     a.y -= ny * overlap;
@@ -265,6 +267,8 @@ export function collideCars(a, b, bKinematic = false) {
       a.vx -= vn * nx * 1.1;
       a.vy -= vn * ny * 1.1;
     }
+    a.vx -= nx * push;
+    a.vy -= ny * push;
   } else {
     const ma = a.spec.mass, mb = b.spec.mass;
     const ka = mb / (ma + mb), kb = ma / (ma + mb);
@@ -276,7 +280,15 @@ export function collideCars(a, b, bKinematic = false) {
       const j = vn * 1.8;
       a.vx -= j * nx * ka; a.vy -= j * ny * ka;
       b.vx += j * nx * kb; b.vy += j * ny * kb;
+      // Seitliche Reibung: Autos nehmen sich beim Rempeln etwas Schwung mit
+      const tx = -ny, ty = nx;
+      const vt = rvx * tx + rvy * ty;
+      const f = vt * 0.15;
+      a.vx -= f * tx * ka; a.vy -= f * ty * ka;
+      b.vx += f * tx * kb; b.vy += f * ty * kb;
     }
+    a.vx -= nx * push * ka; a.vy -= ny * push * ka;
+    b.vx += nx * push * kb; b.vy += ny * push * kb;
   }
   return vn > 60 ? Math.min(1, vn / 500) : 0;
 }

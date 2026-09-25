@@ -81,6 +81,9 @@
         <label class="setting"><span>Kamera</span>
           <select id="set-camera"><option value="auto">Automatisch</option><option value="rotate">Dreht mit dem Auto</option><option value="fixed">Fest (Norden oben)</option></select>
         </label>
+        <label class="setting"><span>Lenkfläche (Touch)</span>
+          <select id="set-steer"><option value="0.7">Sanft</option><option value="1">Normal</option><option value="1.35">Direkt</option></select>
+        </label>
         <label class="setting"><span>Auto-Gas (Touch: Gas immer an)</span><input type="checkbox" id="set-autogas" /></label>
       </details>
       <details class="help">
@@ -162,6 +165,7 @@
       <h2>🏆 Bestenliste <span id="board-kind" class="pill"></span></h2>
       <p class="sub">Schnellste Runde je Strecke – jeder Name einmal mit seiner Bestzeit.</p>
       <div id="board-tracks" class="tabs"></div>
+      <div class="tabs small" id="board-cars"></div>
       <div class="tabs small" id="board-limit">
         <button data-l="10" class="sel">Top 10</button><button data-l="100">Top 100</button><button data-l="1000">Top 1000</button>
       </div>

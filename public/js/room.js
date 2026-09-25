@@ -8,6 +8,8 @@ const TICK_MS = 50; // 20 Hz Zustands-Broadcast
 const COUNTDOWN_MS = 3000;
 const FINISH_GRACE_MS = 30000; // Nach dem ersten Zieleinlauf haben die anderen noch 30 s
 const QUICK_AUTOSTART_MS = 15000;
+const HEARTBEAT_MS = 2000; // Lebenszeichen an alle Spieler
+const CLIENT_TIMEOUT_MS = 8000; // Spieler ohne Lebenszeichen gelten als weg
 const COLORS = ['#e63946', '#3a86ff', '#ffbe0b', '#06d6a0', '#8338ec', '#fb5607', '#ff006e', '#f1f1f1'];
 
 const CAR_TYPES = ['sport', 'drift', 'muscle'];
@@ -40,12 +42,31 @@ export class RoomHost {
     this.autoStartTimer = null;
     this.autoStartAt = 0;
     this.tick = setInterval(() => this.broadcastStates(), TICK_MS);
+    this.heartbeat = setInterval(() => this.pulse(), HEARTBEAT_MS);
+  }
+
+  pulse() {
+    const now = Date.now();
+    for (const c of [...this.clients.values()]) {
+      if (c.local || now - c.lastSeen < CLIENT_TIMEOUT_MS) continue;
+      this.removeClient(c.id);
+    }
+    for (const c of this.clients.values()) c.send({ t: 'hb' });
+  }
+
+  // Einstellungen vom vorherigen Gastgeber übernehmen
+  applySettings({ track, laps }) {
+    if (TRACK_IDS.includes(track)) this.track = track;
+    if (laps >= 1 && laps <= 10) this.laps = laps;
   }
 
   destroy() {
+    this.dead = true;
     clearInterval(this.tick);
+    clearInterval(this.heartbeat);
     clearTimeout(this.raceTimer);
     clearTimeout(this.autoStartTimer);
+    this.clients.clear();
   }
 
   get players() {
@@ -53,14 +74,15 @@ export class RoomHost {
   }
 
   // Neue Verbindung; send(msg) liefert eine Nachricht an genau diesen Client
-  addClient(send) {
-    const c = { id: this.nextId++, send, name: 'Fahrer', color: COLORS[0], carType: 'sport', inRoom: false, state: null };
+  addClient(send, local = false) {
+    const c = { id: this.nextId++, send, local, lastSeen: Date.now(), name: 'Fahrer', color: COLORS[0], carType: 'sport', inRoom: false, state: null };
     this.clients.set(c.id, c);
     send({ t: 'welcome', id: c.id });
     return c.id;
   }
 
   removeClient(id) {
+    if (this.dead) return;
     const c = this.clients.get(id);
     if (!c) return;
     this.leave(c);
@@ -127,7 +149,11 @@ export class RoomHost {
   leave(c) {
     if (!c.inRoom) return;
     c.inRoom = false;
-    if (this.hostId === c.id) this.hostId = this.players.length ? this.players[0].id : null;
+    if (this.hostId === c.id) {
+      this.hostId = this.players.length ? this.players[0].id : null;
+      // Der Gastgeber geht – die anderen erfahren, wer den Raum übernimmt
+      if (this.hostId) this.broadcast({ t: 'hostLeaving', nextId: this.hostId });
+    }
     this.broadcast({ t: 'left', id: c.id });
     this.updateAutoStart();
     this.broadcast(this.roomInfo());
@@ -188,8 +214,10 @@ export class RoomHost {
   }
 
   handle(id, msg) {
+    if (this.dead) return;
     const c = this.clients.get(id);
     if (!c || !msg || typeof msg.t !== 'string') return;
+    c.lastSeen = Date.now();
     const isHost = this.hostId === c.id;
 
     switch (msg.t) {

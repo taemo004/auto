@@ -10,6 +10,8 @@ Inspiriert vom „Sofort-loslegen“-Prinzip von Spielen wie *Top Tennis*: Name 
   - ⚡ *Schnelles Spiel*: automatisch in einen öffentlichen Raum, Autostart nach 15 s sobald 2+ Spieler da sind
   - *Raum erstellen*: privater Raum mit 4-stelligem Code + Einladungslink (`?room=CODE`)
   - Lobby mit Chat, Streckenwahl und Rundenanzahl
+  - **Gastgeber-Wechsel:** Verlässt der Gastgeber den Raum (auch durch Tab schließen), übernimmt automatisch der
+    nächste Spieler – der Raumcode bleibt gültig
 - **Einzelspieler gegen KI** (1–7 Gegner, 3 Schwierigkeitsstufen)
 - **6 Strecken** mit eigenem Thema und Fahrgefühl:
   Speedway (Wiese), Serpentine (Berge, Schotterpassage), Hafenkurs (Container), Wüstenrallye (Schotter, Sprünge),
@@ -17,12 +19,12 @@ Inspiriert vom „Sofort-loslegen“-Prinzip von Spielen wie *Top Tennis*: Name 
 - **3 Autos:** Sportwagen (ausgewogen), Drifter (wendig, rutschig), Muscle Car (schnell, träge)
 - **Spezialsachen:** Boost-Felder, Sprungschanzen, Ölflecken, Nitro-Kanister, Mini-Turbo nach Drifts, Turbostart,
   Untergründe mit unterschiedlicher Haftung (Asphalt, Schotter, Schnee, Eis)
-- **🏆 Bestenliste** der schnellsten Runde je Strecke – Top 10 / 100 / 1000 mit eigener Platzierung
+- **🏆 Bestenliste** der schnellsten Runde je Strecke – Top 10 / 100 / 1000, filterbar nach Auto, mit eigener Platzierung
   (weltweit nach Einrichtung, siehe [BESTENLISTE.md](BESTENLISTE.md))
 - Tribünen mit Publikum, Startampel, Reifenspuren, Partikel, Kamerawackeln, synthetischer Motorsound
 - HUD: Platz, Runde, Zeit, aktuelle Runde, Bestzeit, Live-Rangliste, Minimap, Tacho, Nitro
-- **Handy:** analoge Lenkfläche, große Gas-/Bremsknöpfe, mitdrehende Kamera, optional Auto-Gas –
-  im Hoch- und Querformat
+- **Handy:** analoge Lenkfläche (Empfindlichkeit einstellbar), große Gas-/Bremsknöpfe, mitdrehende Kamera,
+  optional Auto-Gas – im Hoch- und Querformat
 
 ## Steuerung
 
@@ -70,25 +72,41 @@ Dann im Browser **http://localhost:3000** öffnen. Jeder andere statische Webser
 - Jeder Browser simuliert sein eigenes Auto lokal (keine Eingabeverzögerung); die Gegner werden mit ~110 ms
   Interpolation flüssig dargestellt.
 
-**Einschränkungen:** Verlässt der Gastgeber den Raum oder schließt das Fenster, endet der Raum für alle.
-Das Gastgeber-Fenster sollte im Vordergrund bleiben (Browser drosseln Hintergrund-Tabs). In sehr restriktiven
-Netzwerken (manche Firmen-/Schulnetze) kann eine direkte Verbindung scheitern.
+- Verlässt der Gastgeber den Raum, benennt seine Raumlogik einen Nachfolger; bei einem Abbruch (Tab geschlossen,
+  Netz weg) erkennen die anderen das über fehlende Lebenszeichen nach ca. 7 s. Der Nachfolger übernimmt die
+  Raum-ID, alle anderen treten automatisch wieder bei. Ein laufendes Rennen wird dabei abgebrochen.
+
+**Einschränkungen:** Das Gastgeber-Fenster sollte im Vordergrund bleiben (Browser drosseln Hintergrund-Tabs).
+In sehr restriktiven Netzwerken (manche Firmen-/Schulnetze) kann eine direkte Verbindung scheitern.
 
 Optional kann ein eigener PeerJS-Server genutzt werden: `?peerhost=mein-server.de&peerport=443&peerpath=/`
+
+## Tests
+
+```bash
+npm test
+```
+
+Prüft die Streckengeometrie (keine Abkürzungen, fahrbare Kurven), lässt KI-Autos aller Typen jede Strecke
+zu Ende fahren und testet die Raumlogik (Beitreten, Start, Zielprüfung, Ergebnisse, Host-Wechsel).
+Läuft auch automatisch bei jedem Pull Request (`.github/workflows/test.yml`).
 
 ## Aufbau
 
 ```
 server.js            Kleiner lokaler Entwicklungsserver (nur statische Dateien)
-.github/workflows/   Automatische Veröffentlichung auf GitHub Pages
+.github/workflows/   Automatische Veröffentlichung auf GitHub Pages, Tests bei Pull Requests
+test/                Automatische Tests (npm test)
 public/index.html    Menüs, Lobby, HUD
 public/style.css     Styling (inkl. Mobil-Layout)
 public/js/main.js    Spielablauf, Eingabe, Lobby-UI, Netzwerk-Synchronisation & Interpolation
+public/js/board-ui.js  Bestenlisten-Bildschirm
+public/js/util.js    Kleine Helfer (Zeitformat, HTML-Escaping)
 public/js/car.js     Fahrphysik, Rundenzählung (Checkpoints), Kollisionen, KI-Fahrer
 public/js/tracks.js  Streckendefinitionen (Catmull-Rom-Splines) und Geometrie
 public/js/render.js  Canvas-Renderer, Minimap, Effekte
 public/js/audio.js   Motorsound und Effekte
-public/js/net.js     Peer-to-Peer-Verbindungen (PeerJS/WebRTC), Raum erstellen/beitreten/Schnelles Spiel
+public/js/net.js     Peer-to-Peer-Verbindungen (PeerJS/WebRTC), Raum erstellen/beitreten/Schnelles Spiel, Gastgeber-Wechsel
 public/js/room.js    Raumlogik, läuft im Browser des Gastgebers
 public/js/leaderboard.js  Bestenliste (Firebase REST oder lokal)
 public/js/config.js  Adresse der Bestenlisten-Datenbank
