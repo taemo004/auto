@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-v="3">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Turbo Rivals – Online Autorennen</title>
   <meta name="description" content="Kostenloses Browser-Autorennspiel mit Online-Multiplayer. Keine Installation nötig." />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
   <canvas id="game"></canvas>
@@ -185,7 +185,26 @@
     </div>
   </section>
 
-  <script src="vendor/peerjs.min.js"></script>
-  <script type="module" src="js/main.js"></script>
+  <script src="vendor/peerjs.min.js?v=1.5.5"></script>
+  <!-- Versionierte Modul-Adressen: Nach einer Veröffentlichung lädt niemand alte Skripte aus dem Cache -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./js/main.js": "./js/main.js?v=3",
+      "./js/net.js": "./js/net.js?v=3",
+      "./js/room.js": "./js/room.js?v=3",
+      "./js/tracks.js": "./js/tracks.js?v=3",
+      "./js/car.js": "./js/car.js?v=3",
+      "./js/render.js": "./js/render.js?v=3",
+      "./js/audio.js": "./js/audio.js?v=3",
+      "./js/leaderboard.js": "./js/leaderboard.js?v=3",
+      "./js/config.js": "./js/config.js?v=3",
+      "./js/board-ui.js": "./js/board-ui.js?v=3",
+      "./js/util.js": "./js/util.js?v=3",
+      "./js/version.js": "./js/version.js?v=3"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js?v=3"></script>
 </body>
 </html>

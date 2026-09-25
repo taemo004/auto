@@ -6,6 +6,27 @@ import { Renderer, drawTrackPreview, drawCarPreview } from './render.js';
 import { submitLap, personalBest } from './leaderboard.js';
 import { initBoardUI } from './board-ui.js';
 import { $, fmt, esc, sleep } from './util.js';
+import { APP_VERSION } from './version.js';
+
+// Passen Seite und Skripte nicht zusammen (alte Seite aus dem Cache nach einer
+// Veröffentlichung), einmal neu laden – sonst würde das Spiel gleich abstürzen.
+if (document.documentElement.dataset.v !== APP_VERSION) {
+  const key = 'tr_reload_' + APP_VERSION;
+  let reloaded = false;
+  try {
+    reloaded = sessionStorage.getItem(key) === '1';
+    sessionStorage.setItem(key, '1');
+  } catch {}
+  if (!reloaded) {
+    location.reload();
+  } else {
+    const box = document.createElement('div');
+    box.style.cssText = 'position:fixed;inset:0;z-index:99;display:flex;align-items:center;justify-content:center;padding:24px;background:#0f1420;color:#fff;font:18px system-ui,sans-serif;text-align:center';
+    box.innerHTML = 'Eine neue Version von Turbo Rivals wurde veröffentlicht.<br>Bitte lade die Seite in einer Minute neu.';
+    document.body.appendChild(box);
+  }
+  throw new Error('Spieldateien passen nicht zur Seite (Version ' + APP_VERSION + ') – Seite wird neu geladen.');
+}
 import { Net } from './net.js';
 import { Sound } from './audio.js';
 
