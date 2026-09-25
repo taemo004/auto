@@ -1,15 +1,14 @@
-'use strict';
-
 // Kleiner lokaler Entwicklungsserver für public/ (nur statische Dateien).
 // Für das Spiel selbst wird kein Server gebraucht – online läuft es auf GitHub Pages,
 // der Multiplayer verbindet die Browser direkt per WebRTC (siehe public/js/net.js).
 
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC_DIR = path.join(__dirname, 'public');
+const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -19,6 +18,7 @@ const MIME = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
 };
 
 http

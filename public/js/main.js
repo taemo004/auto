@@ -1,19 +1,21 @@
 // Turbo Rivals – Client-Hauptlogik
 
 import { TRACK_DEFS, TRACK_IDS, buildTrack, gridPosition } from './tracks.js';
-import { createCar, updateCar, collideCars, botInput } from './car.js';
-import { Renderer, drawTrackPreview } from './render.js';
+import { createCar, updateCar, collideCars, botInput, CAR_TYPES, CAR_TYPE_IDS } from './car.js';
+import { Renderer, drawTrackPreview, drawCarPreview } from './render.js';
+import { submitLap, personalBest } from './leaderboard.js';
+import { initBoardUI } from './board-ui.js';
+import { $, fmt, esc, sleep } from './util.js';
 import { Net } from './net.js';
 import { Sound } from './audio.js';
 
-const $ = (id) => document.getElementById(id);
 const COLORS = ['#e63946', '#3a86ff', '#ffbe0b', '#06d6a0', '#8338ec', '#fb5607', '#ff006e', '#f1f1f1'];
 const BOT_NAMES = ['Blitz', 'Turbo Tina', 'Max Speed', 'Drift König', 'Rakete', 'Schumi Jr.', 'Vollgas Vera', 'Nitro Nick'];
 const STEP = 1 / 120;
 const SEND_MS = 50;
 const INTERP_MS = 110;
 
-const net = new Net(() => ({ name: myName(), color: profile.color }));
+const net = new Net(() => ({ name: myName(), color: profile.color, carType: profile.carType }));
 const sound = new Sound();
 const renderer = new Renderer($('game'), $('minimap'));
 const trackCache = {};
@@ -41,6 +43,7 @@ function renderColors() {
       profile.color = c;
       localStorage.setItem('tr_color', c);
       renderColors();
+      renderCars();
     };
     box.appendChild(b);
   }
@@ -48,14 +51,68 @@ function renderColors() {
 renderColors();
 const myName = () => profile.name || 'Fahrer';
 
+profile.carType = CAR_TYPES[localStorage.getItem('tr_car')] ? localStorage.getItem('tr_car') : 'sport';
+function renderCars() {
+  const box = $('cars');
+  box.innerHTML = '';
+  for (const id of CAR_TYPE_IDS) {
+    const b = document.createElement('button');
+    b.className = id === profile.carType ? 'sel' : '';
+    const cv = document.createElement('canvas');
+    cv.width = 70;
+    cv.height = 40;
+    drawCarPreview(cv, id, profile.color);
+    b.append(cv, CAR_TYPES[id].name);
+    const small = document.createElement('small');
+    small.textContent = CAR_TYPES[id].desc;
+    b.append(small);
+    b.onclick = () => {
+      profile.carType = id;
+      localStorage.setItem('tr_car', id);
+      renderCars();
+    };
+    box.appendChild(b);
+  }
+}
+renderCars();
+
+// Einstellungen
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const settings = {
+  camera: localStorage.getItem('tr_camera') || 'auto',
+  autoGas: localStorage.getItem('tr_autogas') ? localStorage.getItem('tr_autogas') === '1' : false,
+  steer: +localStorage.getItem('tr_steer') || 1,
+};
+$('set-steer').value = String(settings.steer);
+$('set-steer').onchange = () => {
+  settings.steer = +$('set-steer').value;
+  localStorage.setItem('tr_steer', settings.steer);
+};
+$('set-camera').value = settings.camera;
+$('set-autogas').checked = settings.autoGas;
+$('set-camera').onchange = () => {
+  settings.camera = $('set-camera').value;
+  localStorage.setItem('tr_camera', settings.camera);
+  applyCamera();
+};
+$('set-autogas').onchange = () => {
+  settings.autoGas = $('set-autogas').checked;
+  localStorage.setItem('tr_autogas', settings.autoGas ? '1' : '0');
+};
+function applyCamera() {
+  renderer.rotate = settings.camera === 'rotate' || (settings.camera === 'auto' && isTouch);
+}
+applyCamera();
+
 // ---------- Screens ----------
-const SCREENS = ['menu', 'offline', 'lobby', 'results'];
+const SCREENS = ['menu', 'offline', 'lobby', 'results', 'board'];
 function show(name) {
   for (const s of SCREENS) $('screen-' + s).classList.toggle('hidden', s !== name);
 }
 function setMsg(text) {
   $('menu-msg').textContent = text || '';
 }
+const boardUI = initBoardUI({ myName, show });
 
 // ---------- Eingabe ----------
 const keys = { up: false, down: false, left: false, right: false, drift: false, nitro: false };
@@ -89,13 +146,15 @@ window.addEventListener('blur', () => {
   for (const k in keys) keys[k] = false;
 });
 
-// Touch-Buttons
-const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+// Touch-Buttons (Finger bleibt „gefangen“, auch wenn er leicht vom Button rutscht)
 if (isTouch) document.body.classList.add('touch');
 for (const btn of document.querySelectorAll('#touch button')) {
   const k = btn.dataset.k;
   const on = (e) => {
     e.preventDefault();
+    try {
+      btn.setPointerCapture(e.pointerId);
+    } catch {}
     keys[k] = true;
     btn.classList.add('active');
     sound.resume();
@@ -108,7 +167,53 @@ for (const btn of document.querySelectorAll('#touch button')) {
   btn.addEventListener('pointerdown', on);
   btn.addEventListener('pointerup', off);
   btn.addEventListener('pointercancel', off);
-  btn.addEventListener('pointerleave', off);
+  btn.addEventListener('lostpointercapture', off);
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+// Analoge Lenkfläche: Position des Fingers = Lenkeinschlag
+let touchSteer = null;
+{
+  const pad = $('steer-pad'), knob = $('steer-knob');
+  let pid = null;
+  const move = (e) => {
+    const r = pad.getBoundingClientRect();
+    const half = r.width / 2 - 30;
+    let v = (e.clientX - (r.left + r.width / 2)) / half;
+    v = Math.max(-1, Math.min(1, v));
+    knob.style.transform = `translateX(${v * half}px)`;
+    // Totzone und feinere Kontrolle um die Mitte
+    const a = Math.max(0, Math.abs(v) - 0.08) / 0.92;
+    touchSteer = Math.sign(v) * Math.min(1, Math.pow(a, 1.3) * settings.steer);
+  };
+  pad.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    pid = e.pointerId;
+    try {
+      pad.setPointerCapture(pid);
+    } catch {}
+    pad.classList.add('active');
+    sound.resume();
+    move(e);
+  });
+  pad.addEventListener('pointermove', (e) => e.pointerId === pid && move(e));
+  const end = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null;
+    touchSteer = null;
+    knob.style.transform = '';
+    pad.classList.remove('active');
+  };
+  pad.addEventListener('pointerup', end);
+  pad.addEventListener('pointercancel', end);
+  pad.addEventListener('lostpointercapture', end);
+}
+
+function playerInput() {
+  const inp = { ...keys };
+  if (touchSteer !== null && !keys.left && !keys.right) inp.steer = touchSteer;
+  if (settings.autoGas && !keys.down) inp.up = true;
+  return inp;
 }
 
 document.addEventListener('pointerdown', () => sound.resume(), { once: false });
@@ -140,10 +245,15 @@ function newGame({ mode, trackId, laps, grid, countdown }) {
     over: false,
     lastSend: 0,
     lastCount: null,
-    lapStart: 0,
+    lapStart: null,
     bestLap: 0,
     endTimer: null,
+    started: false,
+    rev: 0,
+    pb: personalBest(trackId),
+    trackId,
   };
+  for (const f of track.features) f.takenUntil = 0;
   for (const slot of grid) {
     const pos = gridPosition(track, slot.slot);
     const car = createCar({ ...slot, ...pos });
@@ -181,7 +291,10 @@ function startDemo() {
   const trackId = TRACK_IDS[Math.floor(Math.random() * TRACK_IDS.length)];
   const grid = [];
   for (let i = 0; i < 6; i++) {
-    grid.push({ id: 'b' + i, slot: i, name: BOT_NAMES[i], color: COLORS[i], isBot: true, skill: 0.88 + Math.random() * 0.1 });
+    grid.push({
+      id: 'b' + i, slot: i, name: BOT_NAMES[i], color: COLORS[i], isBot: true,
+      skill: 0.88 + Math.random() * 0.1, carType: CAR_TYPE_IDS[i % CAR_TYPE_IDS.length],
+    });
   }
   newGame({ mode: 'demo', trackId, laps: 999, grid, countdown: 0 });
   $('hud').classList.add('hidden');
@@ -198,11 +311,11 @@ function startOffline(trackId, laps, bots, diff) {
   let b = 0;
   for (let s = 0; s < total; s++) {
     if (s === playerSlot) {
-      grid.push({ id: 'me', slot: s, name: myName(), color: profile.color, isPlayer: true });
+      grid.push({ id: 'me', slot: s, name: myName(), color: profile.color, isPlayer: true, carType: profile.carType });
     } else {
       grid.push({
         id: 'b' + b, slot: s, name: names[b], color: colors[b % colors.length], isBot: true,
-        skill: diff * (0.94 + Math.random() * 0.06),
+        skill: diff * (0.94 + Math.random() * 0.06), carType: CAR_TYPE_IDS[Math.floor(Math.random() * CAR_TYPE_IDS.length)],
       });
       b++;
     }
@@ -216,7 +329,8 @@ function enterRaceUI() {
   show(null);
   $('hud').classList.remove('hidden');
   $('touch').classList.toggle('hidden', !isTouch);
-  $('lap-best').textContent = '';
+  $('hud-best').textContent = game.pb ? fmt(game.pb.t) : '–';
+  $('hud-best').classList.remove('pb');
   $('toast').classList.remove('show');
   $('countdown').textContent = '';
 }
@@ -238,6 +352,8 @@ function respawn() {
   car.y = t.ys[i];
   car.a = Math.atan2(t.ty[i], t.tx[i]);
   car.vx = car.vy = 0;
+  car.z = car.vz = 0;
+  car.boost = car.oil = 0;
   renderer.clearSkid(car);
 }
 
@@ -262,7 +378,7 @@ function frame(now) {
 
   const focus = game.player || standings()[0];
   const cars = allCars().sort((a, b) => (a === focus) - (b === focus));
-  renderer.draw(cars, focus, dt);
+  renderer.draw(cars, focus, dt, { now, countdown: game.mode === 'demo' ? -9999 : game.startAt - now });
 
   if (game.mode !== 'demo') {
     updateHud(now);
@@ -283,11 +399,32 @@ function step(dt, now) {
   for (const c of g.cars) leader = Math.max(leader, c.progress);
   for (const r of g.remotes.values()) leader = Math.max(leader, r.car.progress);
 
+  // Turbostart: Gas genau beim Start drücken
+  if (!racing && g.player) g.rev = playerInput().up ? g.rev + dt : 0;
+  if (racing && !g.started) {
+    g.started = true;
+    g.lapStart = g.startAt;
+    for (const car of g.cars) {
+      const perfect = car === g.player ? g.rev > 0 && g.rev < 0.45 : car.isBot && Math.random() < 0.3;
+      if (perfect) {
+        car.boost = 1.1;
+        if (car === g.player) {
+          toast('🚀 Turbostart!');
+          sound.beep(1318, 0.25, 'sawtooth', 0.2);
+        }
+      }
+    }
+  }
+
   for (const car of g.cars) {
-    const input = car === g.player ? keys : botInput(car, g.track, dt, g.mode === 'demo' ? undefined : leader);
+    const input = car === g.player ? playerInput() : botInput(car, g.track, dt, g.mode === 'demo' ? undefined : leader);
     car.braking = input.down && car.speed > 20;
     car.hitWall = 0;
-    updateCar(car, input, dt, g.track, racing);
+    updateCar(car, input, dt, g.track, racing, now);
+    if (car.events.length) {
+      for (const e of car.events) carEvent(car, e);
+      car.events.length = 0;
+    }
     if (car.hitWall && car === g.player) {
       sound.crash(car.hitWall);
       renderer.shake = Math.max(renderer.shake, car.hitWall);
@@ -319,17 +456,69 @@ function step(dt, now) {
   }
 }
 
+function carEvent(car, e) {
+  const me = car === game.player;
+  const cos = Math.cos(car.a), sin = Math.sin(car.a);
+  switch (e) {
+    case 'boost':
+      renderer.burst(car.x - cos * 20, car.y - sin * 20, '#fb923c', 10, 200, 0.4, 5);
+      if (me) sound.beep(740, 0.18, 'sawtooth', 0.15);
+      break;
+    case 'jump':
+      if (me) sound.beep(300, 0.3, 'triangle', 0.2);
+      break;
+    case 'land':
+      renderer.burst(car.x, car.y, 'rgba(200,180,140,0.7)', 14, 160, 0.6, 8);
+      if (me) {
+        renderer.shake = Math.max(renderer.shake, 0.5);
+        sound.crash(0.35);
+      }
+      break;
+    case 'oil':
+      if (me) {
+        toast('🛢️ Öl!');
+        sound.beep(180, 0.3, 'sawtooth', 0.2);
+      }
+      break;
+    case 'nitro':
+      renderer.burst(car.x, car.y, '#60a5fa', 14, 180, 0.5, 5);
+      if (me) {
+        toast('+ Nitro');
+        sound.beep(988, 0.12, 'square', 0.15);
+        setTimeout(() => sound.beep(1318, 0.12, 'square', 0.15), 90);
+      }
+      break;
+    case 'turbo':
+    case 'turbo2':
+      renderer.burst(car.x - cos * 24, car.y - sin * 24, e === 'turbo2' ? '#f97316' : '#38bdf8', 16, 240, 0.45, 5);
+      if (me) {
+        toast(e === 'turbo2' ? '🔥 Super-Turbo!' : '💨 Mini-Turbo!', 900);
+        sound.beep(e === 'turbo2' ? 1046 : 880, 0.2, 'sawtooth', 0.18);
+      }
+      break;
+  }
+}
+
 function effects(car, input, dt) {
   if ((car.drifting || (car.braking && car.speed > 320)) && !car.offroad) renderer.addSkid(car);
   else renderer.clearSkid(car);
 
   const cos = Math.cos(car.a), sin = Math.sin(car.a);
   const bx = car.x - cos * 26, by = car.y - sin * 26;
+  if (car.z > 0) {
+    renderer.clearSkid(car);
+    return;
+  }
+  if (car.boost > 0 && Math.random() < dt * 50) {
+    renderer.emit(bx, by, car.vx * 0.3 - cos * 180, car.vy * 0.3 - sin * 180, Math.random() < 0.5 ? '#fb923c' : '#fde047', 0.3, 6);
+  }
   if (car.usingNitro && Math.random() < dt * 60) {
     renderer.emit(bx, by, car.vx * 0.3 - cos * 200, car.vy * 0.3 - sin * 200, Math.random() < 0.5 ? '#00f5d4' : '#3a86ff', 0.35, 7);
   }
-  if (car.offroad && car.speed > 120 && Math.random() < dt * 30) {
-    renderer.emit(bx, by, car.vx * 0.1, car.vy * 0.1, 'rgba(160,130,80,0.6)', 0.7, 10);
+  const dusty = car.offroad || car.surface === 1 || car.surface === 2;
+  if (dusty && car.speed > 120 && Math.random() < dt * 30) {
+    const snow = game.track.themeId === 'snow';
+    renderer.emit(bx, by, car.vx * 0.1, car.vy * 0.1, snow ? 'rgba(240,245,255,0.8)' : 'rgba(160,130,80,0.6)', 0.7, 10);
   }
   if (car.drifting && Math.random() < dt * 25) {
     renderer.emit(bx, by, 0, 0, 'rgba(220,220,220,0.5)', 0.8, 11);
@@ -338,12 +527,12 @@ function effects(car, input, dt) {
 
 function onLap(car, now) {
   const g = game;
-  if (car === g.player && car.lap > 1) {
+  if (car === g.player && car.lap > 1 && g.lapStart !== null) {
     const lapTime = now - g.lapStart;
     if (!g.bestLap || lapTime < g.bestLap) g.bestLap = lapTime;
-    $('lap-best').textContent = `Letzte Runde ${fmt(lapTime)} · Beste ${fmt(g.bestLap)}`;
+    recordLap(lapTime);
     if (car.lap === g.laps) toast('Letzte Runde!');
-    else if (car.lap <= g.laps) toast(`Runde ${car.lap}/${g.laps}`);
+    else if (car.lap <= g.laps) toast(`Runde ${car.lap}/${g.laps} · ${fmt(lapTime)}`);
   }
   if (car === g.player) g.lapStart = now;
 
@@ -361,6 +550,17 @@ function onLap(car, now) {
         scheduleOfflineEnd();
       }
     }
+  }
+}
+
+async function recordLap(lapTime) {
+  const g = game;
+  const { newPB } = await submitLap(g.trackId, myName(), profile.color, profile.carType, lapTime);
+  if (newPB && game === g) {
+    g.pb = { t: Math.round(lapTime) };
+    $('hud-best').textContent = fmt(lapTime);
+    $('hud-best').classList.add('pb');
+    setTimeout(() => toast(`🏆 Neue Bestzeit: ${fmt(lapTime)}`, 2500), 900);
   }
 }
 
@@ -385,14 +585,6 @@ function toast(text, ms = 1800) {
   toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
-function fmt(ms) {
-  if (ms == null) return '–';
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const c = Math.floor((ms % 1000) / 10);
-  return `${m}:${String(s).padStart(2, '0')}.${String(c).padStart(2, '0')}`;
-}
-
 function updateHud(now) {
   const g = game, car = g.player;
   if (!car) return;
@@ -402,6 +594,7 @@ function updateHud(now) {
   const t = car.finished ? car.finishTime : Math.max(0, now - g.startAt);
   $('hud-time').textContent = fmt(t);
   $('hud-kmh').textContent = Math.round(car.speed * 0.34);
+  $('hud-laptime').textContent = fmt(g.lapStart === null || car.finished ? 0 : now - g.lapStart);
   $('hud-nitro').style.width = `${car.nitro * 100}%`;
   $('hud-nitro').style.opacity = car.usingNitro ? 1 : 0.8;
 
@@ -429,23 +622,18 @@ function updateHud(now) {
     cd.classList.toggle('go', text === 'GO!');
     if (text === 'GO!') {
       sound.beep(1046, 0.5, 'square', 0.25);
-      g.lapStart = g.startAt;
     } else if (text) sound.beep(523, 0.2, 'square', 0.2);
   }
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-}
-
 // ---------- Online: Zustandsabgleich ----------
 function sendState(car) {
-  const flags = (car.usingNitro ? 1 : 0) | (car.braking ? 2 : 0) | (car.drifting ? 4 : 0) | (car.finished ? 8 : 0);
+  const flags = (car.usingNitro ? 1 : 0) | (car.braking ? 2 : 0) | (car.drifting ? 4 : 0) | (car.finished ? 8 : 0) | (car.boost > 0 ? 16 : 0);
   net.send({
     t: 'st',
     a: [
       Math.round(car.x * 10) / 10, Math.round(car.y * 10) / 10, Math.round(car.a * 1000) / 1000,
-      Math.round(car.vx), Math.round(car.vy), Math.round(car.progress * 10000) / 10000, flags,
+      Math.round(car.vx), Math.round(car.vy), Math.round(car.progress * 10000) / 10000, flags, Math.round(car.z),
     ],
   });
 }
@@ -464,11 +652,11 @@ function updateRemotes(now) {
       let da = b.a - a.a;
       while (da > Math.PI) da -= Math.PI * 2;
       while (da < -Math.PI) da += Math.PI * 2;
-      s = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, a: a.a + da * k, src: b };
+      s = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, a: a.a + da * k, z: a.z + (b.z - a.z) * k, src: b };
     } else {
       // Extrapolieren (max. 200 ms)
       const e = Math.min(0.2, Math.max(0, (renderTime - a.t) / 1000));
-      s = { x: a.x + a.vx * e, y: a.y + a.vy * e, a: a.a, src: a };
+      s = { x: a.x + a.vx * e, y: a.y + a.vy * e, a: a.a, z: a.z, src: a };
     }
     car.x = s.x;
     car.y = s.y;
@@ -480,6 +668,8 @@ function updateRemotes(now) {
     car.usingNitro = !!(s.src.f & 1);
     car.braking = !!(s.src.f & 2);
     car.drifting = !!(s.src.f & 4);
+    car.boost = s.src.f & 16 ? 0.1 : 0;
+    car.z = s.z || 0;
     effects(car, {}, 1 / 60);
   }
 }
@@ -487,6 +677,7 @@ function updateRemotes(now) {
 // ---------- Online: Nachrichten ----------
 net.on('joined', (m) => {
   profile.color = m.color;
+  nextHostId = null;
   $('chat-log').innerHTML = '';
   setRoomParam(m.code);
   show('lobby');
@@ -495,6 +686,11 @@ net.on('joined', (m) => {
 net.on('room', (m) => {
   lobby = m;
   renderLobby();
+});
+
+let nextHostId = null; // vom scheidenden Gastgeber benannter Nachfolger
+net.on('hostLeaving', (m) => {
+  nextHostId = m.nextId;
 });
 
 net.on('error', (m) => {
@@ -506,7 +702,8 @@ net.on('start', (m) => {
   const grid = m.grid.map((g) => {
     const p = lobby.players.find((x) => x.id === g.id) || { name: 'Fahrer', color: '#999' };
     const isMe = g.id === net.id;
-    return { id: g.id, slot: g.slot, name: p.name, color: p.color, isPlayer: isMe, remote: !isMe };
+    const carType = isMe ? profile.carType : p.carType;
+    return { id: g.id, slot: g.slot, name: p.name, color: p.color, isPlayer: isMe, remote: !isMe, carType };
   });
   if (!grid.some((g) => g.isPlayer)) return;
   sound.resume();
@@ -517,10 +714,10 @@ net.on('start', (m) => {
 net.on('s', (m) => {
   if (!game || game.mode !== 'online') return;
   const now = performance.now();
-  for (const [id, x, y, a, vx, vy, pr, f] of m.s) {
+  for (const [id, x, y, a, vx, vy, pr, f, z] of m.s) {
     const r = game.remotes.get(id);
     if (!r) continue;
-    r.snaps.push({ t: now, x, y, a, vx, vy, pr, f });
+    r.snaps.push({ t: now, x, y, a, vx, vy, pr, f, z: z || 0 });
     if (r.snaps.length > 30) r.snaps.shift();
   }
 });
@@ -556,13 +753,50 @@ net.on('results', (m) => {
 
 net.on('chat', (m) => addChat(`<b style="color:${m.color}">${esc(m.name)}:</b> ${esc(m.text)}`));
 
-net.on('disconnect', () => {
+// Der Gastgeber ist weg: Der nächste Spieler in der Liste übernimmt den Raum, alle anderen treten neu bei.
+net.on('hostlost', async (m) => {
+  const old = lobby;
   lobby = null;
+  clearInterval(lobbyTick);
+  const wasRacing = game && game.mode === 'online';
+  if (wasRacing) {
+    clearTimeout(game.endTimer);
+    startDemo();
+  }
+  // Nachfolger: vom alten Gastgeber benannt, sonst (Verbindung abgerissen) der erste Spieler nach dem Host
+  let next = old && nextHostId != null ? old.players.find((p) => p.id === nextHostId) : null;
+  if (!next && old) next = old.players.find((p) => p.id !== old.hostId);
+  nextHostId = null;
+  const iAmNext = !!next && next.id === m.myId;
+  if (!old || !next) return dropToMenu('Die Verbindung zum Raum wurde getrennt.');
+
+  show('lobby');
+  $('lobby-players').innerHTML = '';
+  $('btn-start').classList.add('hidden');
+  $('lobby-hint').textContent = '';
+  $('lobby-status').textContent = iAmNext
+    ? 'Der Gastgeber hat den Raum verlassen – du übernimmst…'
+    : `Der Gastgeber hat den Raum verlassen – ${esc(next.name)} übernimmt, bitte warten…`;
+  try {
+    if (iAmNext) await net.takeOver(m.code, m.isPublic, { track: old.track, laps: old.laps });
+    else {
+      await sleep(1500);
+      await net.rejoin(m.code);
+    }
+    addChat(`<span class="sys">Der Gastgeber hat den Raum verlassen. ${wasRacing ? 'Das Rennen wurde abgebrochen. ' : ''}Neuer Gastgeber: ${esc(next.name)}</span>`);
+  } catch {
+    dropToMenu('Der Raum konnte nicht übernommen werden. Erstelle einen neuen Raum oder tritt erneut bei.');
+  }
+});
+
+function dropToMenu(msg) {
+  lobby = null;
+  net.close();
   setRoomParam(null);
   if (game && game.mode === 'online') startDemo();
   show('menu');
-  setMsg('Die Verbindung zum Raum wurde getrennt (hat der Gastgeber den Raum verlassen?).');
-});
+  setMsg(msg);
+}
 
 // ---------- Ergebnisse ----------
 function showResults(results, myId) {
@@ -573,6 +807,7 @@ function showResults(results, myId) {
     .join('');
   const wasOnline = g.mode === 'online';
   const setup = g.setup;
+  boardUI.showRaceLapInfo(g);
   startDemo();
   show('results');
   $('btn-results-ok').onclick = () => {

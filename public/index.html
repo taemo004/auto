@@ -26,21 +26,18 @@
     </div>
     <div id="countdown"></div>
     <div id="toast"></div>
-    <div id="lap-best"></div>
+    <div id="lap-info"><div><span class="lbl">Runde</span> <b id="hud-laptime" class="mono">0:00.00</b></div><div><span class="lbl">Beste</span> <b id="hud-best" class="mono">–</b></div></div>
     <button id="btn-quit" class="icon-btn" title="Rennen verlassen (Esc)">✕</button>
     <button id="btn-mute" class="icon-btn" title="Ton an/aus (M)">🔊</button>
   </div>
 
   <!-- Touch-Steuerung -->
   <div id="touch" class="hidden">
-    <div class="touch-left">
-      <button data-k="left">◀</button>
-      <button data-k="right">▶</button>
-    </div>
+    <div id="steer-pad"><div class="steer-track"></div><div id="steer-knob"></div><span>◀ Lenken ▶</span></div>
     <div class="touch-right">
       <button data-k="nitro" class="small">N₂O</button>
       <button data-k="drift" class="small">Drift</button>
-      <button data-k="down">▼</button>
+      <button data-k="down" class="brake">▼</button>
       <button data-k="up" class="gas">▲</button>
     </div>
   </div>
@@ -59,6 +56,10 @@
         <span>Lackierung</span>
         <div id="colors" class="colors"></div>
       </div>
+      <div class="field">
+        <span>Auto</span>
+        <div id="cars" class="cars"></div>
+      </div>
 
       <button id="btn-quick" class="btn primary">⚡ Schnelles Spiel</button>
       <div class="row">
@@ -69,17 +70,35 @@
         <input id="in-code" maxlength="4" placeholder="CODE" autocomplete="off" />
         <button id="btn-join-go" class="btn">Los</button>
       </div>
-      <button id="btn-offline" class="btn ghost">🤖 Gegen KI fahren (Einzelspieler)</button>
+      <div class="row">
+        <button id="btn-offline" class="btn ghost">🤖 Gegen KI</button>
+        <button id="btn-board" class="btn ghost">🏆 Bestenliste</button>
+      </div>
       <p id="menu-msg" class="msg"></p>
 
       <details class="help">
-        <summary>Steuerung</summary>
+        <summary>Einstellungen</summary>
+        <label class="setting"><span>Kamera</span>
+          <select id="set-camera"><option value="auto">Automatisch</option><option value="rotate">Dreht mit dem Auto</option><option value="fixed">Fest (Norden oben)</option></select>
+        </label>
+        <label class="setting"><span>Lenkfläche (Touch)</span>
+          <select id="set-steer"><option value="0.7">Sanft</option><option value="1">Normal</option><option value="1.35">Direkt</option></select>
+        </label>
+        <label class="setting"><span>Auto-Gas (Touch: Gas immer an)</span><input type="checkbox" id="set-autogas" /></label>
+      </details>
+      <details class="help">
+        <summary>Steuerung &amp; Spezialsachen</summary>
         <ul>
           <li><kbd>W</kbd>/<kbd>↑</kbd> Gas &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> Bremse/Rückwärts</li>
           <li><kbd>A</kbd>/<kbd>D</kbd> oder <kbd>←</kbd>/<kbd>→</kbd> Lenken</li>
           <li><kbd>Leertaste</kbd> Drift (lädt Nitro auf) &nbsp; <kbd>Shift</kbd> Nitro</li>
           <li><kbd>R</kbd> Zurück auf die Strecke &nbsp; <kbd>M</kbd> Ton &nbsp; <kbd>Esc</kbd> Verlassen</li>
-          <li>Auf dem Handy: Touch-Buttons am Bildschirmrand</li>
+          <li>Handy: links über die Lenkfläche wischen, rechts Gas/Bremse</li>
+          <li>🟧 <b>Boost-Feld</b> gibt Tempo · 🟨 <b>Rampe</b> lässt dich springen</li>
+          <li>⚫ <b>Öl</b> bringt dich ins Schleudern · 🔵 <b>N-Kanister</b> füllt Nitro</li>
+          <li><b>Mini-Turbo:</b> Drift halten und loslassen, wenn Funken sprühen</li>
+          <li><b>Turbostart:</b> Gas genau bei „GO!“ drücken (nicht vorher halten)</li>
+          <li>Schotter, Schnee und Eis haben weniger Haftung</li>
         </ul>
       </details>
     </div>
@@ -140,11 +159,28 @@
     </div>
   </section>
 
+  <!-- Bestenliste -->
+  <section id="screen-board" class="screen hidden">
+    <div class="panel board">
+      <h2>🏆 Bestenliste <span id="board-kind" class="pill"></span></h2>
+      <p class="sub">Schnellste Runde je Strecke – jeder Name einmal mit seiner Bestzeit.</p>
+      <div id="board-tracks" class="tabs"></div>
+      <div class="tabs small" id="board-cars"></div>
+      <div class="tabs small" id="board-limit">
+        <button data-l="10" class="sel">Top 10</button><button data-l="100">Top 100</button><button data-l="1000">Top 1000</button>
+      </div>
+      <div id="board-me" class="board-me"></div>
+      <ol id="board-list" class="results board-list"></ol>
+      <button class="btn ghost back">Zurück</button>
+    </div>
+  </section>
+
   <!-- Ergebnisse -->
   <section id="screen-results" class="screen hidden">
     <div class="panel">
       <h2>🏁 Ergebnis</h2>
       <ol id="results-list" class="results"></ol>
+      <div id="results-extra" class="board-me"></div>
       <button id="btn-results-ok" class="btn primary">Weiter</button>
     </div>
   </section>
