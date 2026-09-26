@@ -50,6 +50,11 @@ Danach ist das Spiel unter `https://<benutzername>.github.io/<repository>/` erre
 
 > Hinweis: GitHub Pages ist für öffentliche Repositories kostenlos, für private Repositories braucht man GitHub Pro/Team.
 
+**Vor jeder Veröffentlichung die Versionsnummer hochzählen:** in `public/js/version.js` und in `public/index.html`
+(`data-v`, alle `?v=` und die Import-Map – `npm test` prüft, dass alles übereinstimmt). Browser dürfen die Seite
+bis zu 10 Minuten zwischenspeichern; die Versionsnummer sorgt dafür, dass alte Seiten die neuen Skripte nicht
+mit alten mischen, sondern sich einmal selbst neu laden.
+
 ## Lokal starten
 
 Voraussetzung: Node.js ≥ 18 (keine Abhängigkeiten nötig)
